@@ -98,8 +98,10 @@ class AodActivity : AppCompatActivity() {
                 WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
                 WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
         )
-        // Lowest possible brightness: AOD should be dim.
-        window.attributes = window.attributes.apply { screenBrightness = 0.02f }
+        // Normal brightness: follow the system brightness setting.
+        window.attributes = window.attributes.apply {
+            screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+        }
         window.setBackgroundDrawableResource(android.R.color.black)
     }
 
@@ -138,9 +140,9 @@ class AodActivity : AppCompatActivity() {
         val pm = getSystemService(POWER_SERVICE) as PowerManager
         @Suppress("DEPRECATION")
         wakeLock = pm.newWakeLock(
-            PowerManager.SCREEN_DIM_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+            PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
             "aod:screen"
-        ).also { it.acquire(AOD_TIMEOUT_MS) }
+        ).also { it.setReferenceCounted(false); it.acquire() } // no timeout: never turns off
     }
 
     private fun hideSystemBars() {
@@ -184,10 +186,13 @@ class AodActivity : AppCompatActivity() {
         dateText.text = SimpleDateFormat("EEE, d MMM", Locale.getDefault()).format(now)
     }
 
-    /** Anti burn-in: nudge the whole content block every 60 s. */
+    /** Anti burn-in: move the clock block to a new random spot every 60 s,
+     *  always keeping it fully inside the screen. */
     private fun shiftContent() {
-        val dx = Random.nextInt(-SHIFT_PX, SHIFT_PX + 1).toFloat()
-        val dy = Random.nextInt(-SHIFT_PX, SHIFT_PX + 1).toFloat()
+        val maxX = ((root.width - content.width) / 2f).coerceAtLeast(0f) * 0.8f
+        val maxY = ((root.height - content.height) / 2f).coerceAtLeast(0f) * 0.6f
+        val dx = if (maxX > 0) Random.nextFloat() * 2 * maxX - maxX else 0f
+        val dy = if (maxY > 0) Random.nextFloat() * 2 * maxY - maxY else 0f
         content.animate().translationX(dx).translationY(dy).setDuration(1200).start()
     }
 
@@ -200,7 +205,7 @@ class AodActivity : AppCompatActivity() {
         val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
         val charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
             status == BatteryManager.BATTERY_STATUS_FULL
-        battery.text = if (charging) "⚡ $pct%" else "$pct%"
+        battery.text = if (charging) "⚡ Cargando · $pct%" else "🔋 Batería $pct%"
     }
 
     // ---- media --------------------------------------------------------------
@@ -266,10 +271,20 @@ class AodActivity : AppCompatActivity() {
             dismiss()
             return true
         }
+        // Keep screen awake on any other key
         return super.onKeyDown(keyCode, event)
     }
 
     override fun onBackPressed() = dismiss()
+
+    /** Re-assert keep-awake whenever the window regains focus. */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            hideSystemBars()
+            if (wakeLock?.isHeld != true) acquireWakeLock()
+        }
+    }
 
     private fun dismiss() {
         releaseWakeLock()
@@ -289,6 +304,5 @@ class AodActivity : AppCompatActivity() {
     companion object {
         private const val SHIFT_INTERVAL_MS = 60_000L
         private const val SHIFT_PX = 24
-        private const val AOD_TIMEOUT_MS = 10 * 60 * 1000L
     }
 }

@@ -39,7 +39,10 @@ class AodService : Service() {
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
-                Intent.ACTION_SCREEN_OFF -> launchAod(context)
+                Intent.ACTION_SCREEN_OFF ->
+                    // short delay lets the system finish turning off before we wake it
+                    android.os.Handler(android.os.Looper.getMainLooper())
+                        .postDelayed({ launchAod(context) }, 250)
                 Intent.ACTION_SCREEN_ON -> { /* no-op, activity handles itself */ }
             }
         }
